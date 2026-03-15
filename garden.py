@@ -35,6 +35,20 @@ WET_THRESHOLD = 9000
 
 # AWS Setup
 cloudwatch = boto3.client('cloudwatch', region_name='us-east-1')
+logs = boto3.client('logs', region_name='us-east-1')
+LOG_GROUP = 'RaspberryPiGarden'
+LOG_STREAM = 'garden-py'
+
+def log(msg):
+    print(msg)
+    try:
+        logs.put_log_events(
+            logGroupName=LOG_GROUP,
+            logStreamName=LOG_STREAM,
+            logEvents=[{'timestamp': int(time.time() * 1000), 'message': msg}]
+        )
+    except Exception as e:
+        print(f"Log error: {e}")
 
 # Sensor Setup
 i2c = busio.I2C(board.SCL, board.SDA)
@@ -63,27 +77,29 @@ def send_metrics():
             metrics.append({'MetricName': 'CPUTemperature', 'Value': cpu_temp, 'Unit': 'None'})
         if metrics:
             cloudwatch.put_metric_data(Namespace='RaspberryPiGarden', MetricData=metrics)
-            if DEBUG:
-                print(f"[{datetime.now():%H:%M:%S}] Metrics sent — moisture={moisture}, cpu_temp={cpu_temp}°F")
+            log(f"[{datetime.now():%H:%M:%S}] Metrics sent — moisture={moisture}, cpu_temp={cpu_temp}°F")
     except Exception as e:
-        print(f"Metric error: {e}")
+        log(f"Metric error: {e}")
 
 def water_section(pin, duration):
     try:
         relay_num = {RELAY1_PIN: 1, RELAY2_PIN: 2, RELAY3_PIN: 3}[pin]
-        print(f"[{datetime.now():%H:%M:%S}] Relay {relay_num} ON (pin {pin}) for {duration}s")
+        log(f"[{datetime.now():%H:%M:%S}] Relay {relay_num} ON (pin {pin}) for {duration}s")
         relay_start_times[pin] = time.time()
         GPIO.output(pin, GPIO.HIGH)
         time.sleep(duration)
         GPIO.output(pin, GPIO.LOW)
         elapsed = time.time() - relay_start_times[pin]
-        print(f"[{datetime.now():%H:%M:%S}] Relay {relay_num} OFF — ran {elapsed:.1f}s")
-        cloudwatch.put_metric_data(
-            Namespace='RaspberryPiGarden',
-            MetricData=[{'MetricName': f'Relay{relay_num}Duration', 'Value': elapsed, 'Unit': 'Seconds'}]
-        )
+        log(f"[{datetime.now():%H:%M:%S}] Relay {relay_num} OFF — ran {elapsed:.1f}s")
+        try:
+            cloudwatch.put_metric_data(
+                Namespace='RaspberryPiGarden',
+                MetricData=[{'MetricName': f'Relay{relay_num}Duration', 'Value': elapsed, 'Unit': 'Seconds'}]
+            )
+        except Exception as e:
+            log(f"Metric error (relay duration): {e}")
     except Exception as e:
-        print(f"Watering error on pin {pin}: {e}")
+        log(f"Watering error on pin {pin}: {e}")
         try:
             GPIO.output(pin, GPIO.LOW)
         except:
@@ -103,22 +119,21 @@ try:
             if (DEBUG or now.hour == 6) and (DEBUG or (now - last_watering).total_seconds() >= 21600):
                 try:
                     moisture = chan.value
-                    if DEBUG:
-                        print(f"[{now:%H:%M:%S}] Checking moisture: {moisture} (threshold={WET_THRESHOLD})")
+                    log(f"[{now:%H:%M:%S}] Checking moisture: {moisture} (threshold={WET_THRESHOLD})")
                     if moisture > WET_THRESHOLD:
-                        print(f"[{now:%H:%M:%S}] Starting watering cycle")
+                        log(f"[{now:%H:%M:%S}] Starting watering cycle")
                         for pin in [RELAY1_PIN, RELAY2_PIN, RELAY3_PIN]:
                             water_section(pin, DURATIONS[pin])
                         last_watering = now
-                        print(f"[{now:%H:%M:%S}] Watering cycle complete")
+                        log(f"[{now:%H:%M:%S}] Watering cycle complete")
                     else:
-                        print("Skipping watering - soil is wet")
+                        log("Skipping watering - soil is wet")
                 except Exception as e:
-                    print(f"Watering cycle error: {e}")
+                    log(f"Watering cycle error: {e}")
             
             time.sleep(1 if DEBUG else 60)
         except Exception as e:
-            print(f"Loop error: {e}")
+            log(f"Loop error: {e}")
             time.sleep(1 if DEBUG else 60)
         
 except KeyboardInterrupt:
