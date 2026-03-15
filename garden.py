@@ -106,6 +106,7 @@ def water_section(pin, duration):
             pass
 
 try:
+    log(f"Garden Pi is on!")
     while True:
         try:
             now = datetime.now()
